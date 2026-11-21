@@ -206,6 +206,40 @@ function App() {
     }
   }
 
+  async function skipImage() {
+    if (!view) return;
+    setLoading(true);
+    setError("");
+    try {
+      const result = await api("/api/image/skip", {
+        method: "POST",
+        body: JSON.stringify({ expected_version: view.version, idempotency_key: crypto.randomUUID() })
+      });
+      setView(result.view ?? null);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "画像なしで進めませんでした。");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function retryPdf() {
+    if (!view) return;
+    setLoading(true);
+    setError("");
+    try {
+      const result = await api("/api/pdf/retry", {
+        method: "POST",
+        body: JSON.stringify({ expected_version: view.version, idempotency_key: crypto.randomUUID() })
+      });
+      setView(result.view ?? null);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "PDF再試行できませんでした。");
+    } finally {
+      setLoading(false);
+    }
+  }
+
   return (
     <main>
       <header>
@@ -274,6 +308,25 @@ function App() {
           <p className="step">PDFの準備ができました</p>
           <a className="button" href="/api/download">PDFをダウンロード</a>
           <button disabled={loading} onClick={() => void complete()}>完了</button>
+        </section>
+      )}
+
+      {view?.status === "IMAGE_ERROR" && (
+        <section className="card">
+          <p className="step">画像を生成できませんでした</p>
+          <p>再試行するか、装飾なしで進めます。</p>
+          <div className="actions">
+            <button className="secondary" disabled={loading} onClick={() => void skipImage()}>画像なしで進む</button>
+          </div>
+        </section>
+      )}
+
+      {view?.status === "PDF_ERROR" && (
+        <section className="card">
+          <p className="step">PDFを作成できませんでした</p>
+          <div className="actions">
+            <button disabled={loading} onClick={() => void retryPdf()}>PDFを再試行</button>
+          </div>
         </section>
       )}
 

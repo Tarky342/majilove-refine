@@ -18,11 +18,19 @@ const contentSchema = z.object({
 export type HearingResult = z.infer<typeof hearingSchema>;
 export type ContentResult = z.infer<typeof contentSchema>;
 
-export function getOpenAIKey(env: { OPENAI_API_KEY?: string; API_KEY?: string }): string | undefined {
-  return env.OPENAI_API_KEY ?? env.API_KEY;
+export function parseHearingResult(text: string): HearingResult {
+  return hearingSchema.parse(JSON.parse(text));
 }
 
-export function createOpenAI(env: { OPENAI_API_KEY?: string; API_KEY?: string }): OpenAI | null {
+export function parseContentResult(text: string): ContentResult {
+  return contentSchema.parse(JSON.parse(text));
+}
+
+export function getOpenAIKey(env: { OPENAI_API_KEY?: string }): string | undefined {
+  return env.OPENAI_API_KEY;
+}
+
+export function createOpenAI(env: { OPENAI_API_KEY?: string }): OpenAI | null {
   const apiKey = getOpenAIKey(env);
   return apiKey ? new OpenAI({ apiKey }) : null;
 }
@@ -63,7 +71,7 @@ export async function askHearing(
       }
     }
   });
-  return hearingSchema.parse(JSON.parse(response.output_text));
+  return parseHearingResult(response.output_text);
 }
 
 export async function createContent(
@@ -94,7 +102,7 @@ export async function createContent(
       }
     }
   });
-  return contentSchema.parse(JSON.parse(response.output_text));
+  return parseContentResult(response.output_text);
 }
 
 export async function generateDecoration(
@@ -115,5 +123,11 @@ export async function generateDecoration(
   const binary = atob(base64);
   const bytes = new Uint8Array(binary.length);
   for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  if (bytes.length < 8 ||
+      bytes[0] !== 0x89 || bytes[1] !== 0x50 || bytes[2] !== 0x4e || bytes[3] !== 0x47 ||
+      bytes[4] !== 0x0d || bytes[5] !== 0x0a || bytes[6] !== 0x1a || bytes[7] !== 0x0a ||
+      bytes.length > 6 * 1024 * 1024) {
+    throw new Error("INVALID_PNG");
+  }
   return { bytes, mimeType: "image/png" };
 }

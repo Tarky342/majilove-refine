@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { sessionViewSchema } from "../src/shared/schemas";
+import { parseHearingResult, parseContentResult } from "../src/worker/openai";
 
 describe("SessionView contract", () => {
   it("accepts a hearing snapshot", () => {
@@ -36,5 +37,26 @@ describe("SessionView contract", () => {
       expires_at: "2026-11-23T00:00:00.000Z"
     });
     expect(result.success).toBe(false);
+  });
+});
+
+describe("OpenAI structured output", () => {
+  it("accepts a valid hearing result", () => {
+    expect(parseHearingResult(JSON.stringify({
+      next_action: "ask",
+      question: "何を一番伝えたいですか？",
+      summary: "感謝",
+      key_facts: ["いつも話を聞いてくれる"],
+      tone: "やさしい"
+    })).next_action).toBe("ask");
+  });
+
+  it("rejects invalid JSON and incomplete content", () => {
+    expect(() => parseHearingResult("{")).toThrow();
+    expect(() => parseContentResult(JSON.stringify({
+      title: "",
+      contents: "本文",
+      image_brief: "花"
+    }))).toThrow();
   });
 });

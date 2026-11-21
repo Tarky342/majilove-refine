@@ -1,4 +1,9 @@
 AI/
+.dev.vars
+.env
+dist/
+.wrangler/
+test-results/
 .editorconfig
 .gitattributes
 eslint.config.js

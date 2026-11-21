@@ -12,9 +12,27 @@ npm run dev
 
 ブラウザで `http://127.0.0.1:8787` を開きます。
 
+## Cloudflare bindings
+
+`wrangler.jsonc` に次のbinding名を設定しています。
+
+- `DB`: D1 `letter-pdf-db`
+- `R2`: private R2 `letter-pdf-private`
+- `BROWSER`: Browser Run
+
+ローカルD1には次でmigrationを適用します。
+
+```powershell
+npx wrangler d1 migrations apply letter-pdf-db --local
+```
+
+本番R2バケットはCloudflare Dashboardで有効化・作成後に、ダッシュボードの公開アクセスを無効にしてください。
+
 ## モックモード
 
-`wrangler.jsonc` の `MOCK_MODE=true` ではOpenAIを呼び出さず、ローカルメモリ内でセッションを保持します。通常の開発・単体テスト・モックE2Eに使用します。本番ではD1/R2/Workflows/Browser Runへ接続します。
+`wrangler.jsonc` の `MOCK_MODE=true` ではOpenAIを呼び出さず、ローカルメモリ内でセッションを保持します。CIや課金なしの開発に使用します。実モードでは `MOCK_MODE=false` とし、`.dev.vars` またはWorker Secretの `OPENAI_API_KEY` が必須です。キー未設定時は利用可能なふりをせず、503で停止します。
+
+実モードでローカル確認する場合は `npm run dev:real` を使用します。
 
 ## セットアップ前提
 

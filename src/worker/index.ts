@@ -4,14 +4,15 @@ import { zValidator } from "@hono/zod-validator";
 import { z } from "zod";
 import type { SessionStatus, SessionView } from "../shared/schemas";
 import { askHearing, createContent, createOpenAI, generateDecoration } from "./openai";
+import { renderLetterHtml } from "./render";
 
 type Bindings = {
   ASSETS: { fetch(request: Request): Promise<Response> };
   DB?: D1Database;
   R2?: R2Bucket;
+  BROWSER?: BrowserRun;
   MOCK_MODE?: string;
   OPENAI_API_KEY?: string;
-  API_KEY?: string;
   MODEL_TEXT?: string;
   MODEL_IMAGE?: string;
 };
@@ -41,6 +42,8 @@ type Session = {
   questions: string[];
   style_id: "soft_watercolor" | "minimal" | "stars";
   artifact_bytes: Uint8Array | null;
+  artifact_key: string | null;
+  pdf_key: string | null;
 };
 
 const sessions = new Map<string, Session>();
@@ -107,6 +110,15 @@ function bump(session: Session): void {
   session.version += 1;
 }
 
+function bytesToBase64(bytes: Uint8Array): string {
+  let binary = "";
+  const chunkSize = 0x8000;
+  for (let offset = 0; offset < bytes.length; offset += chunkSize) {
+    binary += String.fromCharCode(...bytes.subarray(offset, offset + chunkSize));
+  }
+  return btoa(binary);
+}
+
 app.post("/api/sessions", zValidator("json", initialSchema), async (c) => {
   const existing = await sessionForCookie(c);
   if (existing) {
@@ -130,7 +142,9 @@ app.post("/api/sessions", zValidator("json", initialSchema), async (c) => {
     initial_message: body.initial_message,
     questions: [],
     style_id: body.style_id ?? "soft_watercolor",
-    artifact_bytes: null
+    artifact_bytes: null,
+    artifact_key: null,
+    pdf_key: null
   };
   sessions.set(session.id, session);
   c.header("Set-Cookie", `letter_session=${encodeURIComponent(token)}; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=86400`);
@@ -313,6 +327,10 @@ app.post("/api/draft/approve", zValidator("json", z.object({
         session.style_id
       );
       session.artifact_bytes = image.bytes;
+      if (c.env.R2) {
+        session.artifact_key = `sessions/${session.id}/assets/${session.artifact_id}.png`;
+        await c.env.R2.put(session.artifact_key, image.bytes, { httpMetadata: { contentType: "image/png" } });
+      }
       session.status = "ART_REVIEW";
     } catch {
       session.status = "IMAGE_ERROR";
@@ -332,6 +350,13 @@ app.get("/api/image/current", async (c) => {
     c.header("Content-Type", "image/png");
     const buffer = session.artifact_bytes.buffer.slice(session.artifact_bytes.byteOffset, session.artifact_bytes.byteOffset + session.artifact_bytes.byteLength) as ArrayBuffer;
     return c.body(buffer);
+  }
+  if (c.env.R2 && session.artifact_key) {
+    const object = await c.env.R2.get(session.artifact_key);
+    if (object) {
+      c.header("Content-Type", "image/png");
+      return c.body(await object.arrayBuffer());
+    }
   }
   c.header("Content-Type", "image/svg+xml");
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="600" height="800" viewBox="0 0 600 800"><rect width="600" height="800" fill="#f8f4ea"/><circle cx="150" cy="180" r="80" fill="#e7b7bd" opacity=".55"/><circle cx="430" cy="620" r="120" fill="#b8d4c8" opacity=".45"/><path d="M300 180 C370 300 370 470 300 620" fill="none" stroke="#8a6f64" stroke-width="3" opacity=".5"/></svg>`;
@@ -356,9 +381,18 @@ app.post("/api/image/approve", zValidator("json", z.object({
   }
   session.status = "PDF_RUNNING";
   bump(session);
-  await createMockPdf(session);
-  session.status = "READY";
-  session.pdf_ready = true;
+  try {
+    if (c.env.MOCK_MODE !== "false") {
+      await createMockPdf(session);
+    } else {
+      await createBrowserPdf(c, session);
+    }
+    session.status = "READY";
+    session.pdf_ready = true;
+  } catch {
+    session.status = "PDF_ERROR";
+    session.pdf_ready = false;
+  }
   bump(session);
   return c.json(toView(session));
 });
@@ -375,6 +409,50 @@ app.post("/api/image/skip", zValidator("json", z.object({ expected_version: z.nu
   bump(session);
   return c.json(toView(session));
 });
+
+async function createBrowserPdf(c: Context<{ Bindings: Bindings }>, session: Session): Promise<void> {
+  if (!c.env.BROWSER) throw new Error("BROWSER_NOT_CONFIGURED");
+  if (!c.env.R2) throw new Error("R2_NOT_CONFIGURED");
+  if (!session.draft?.approved) throw new Error("DRAFT_NOT_APPROVED");
+
+  let imageUrl: string | null = null;
+  if (session.artifact_bytes) {
+    imageUrl = `data:image/png;base64,${bytesToBase64(session.artifact_bytes)}`;
+  } else if (session.artifact_key) {
+    const object = await c.env.R2.get(session.artifact_key);
+    if (object) imageUrl = `data:image/png;base64,${bytesToBase64(new Uint8Array(await object.arrayBuffer()))}`;
+  }
+
+  const html = renderLetterHtml(session.draft.title, session.draft.contents, imageUrl, session.style_id);
+  if (new TextEncoder().encode(html).length > 20 * 1024 * 1024) throw new Error("HTML_TOO_LARGE");
+  const response = await c.env.BROWSER.quickAction("pdf", {
+    html,
+    pdfOptions: {
+      format: "a4",
+      printBackground: true,
+      preferCSSPageSize: true
+    }
+  });
+  if (!response.ok) throw new Error(`BROWSER_HTTP_${response.status}`);
+  const bytes = new Uint8Array(await response.arrayBuffer());
+  const header = new TextDecoder("ascii").decode(bytes.slice(0, 5));
+  if (header !== "%PDF-" || bytes.length < 1024 || bytes.length > 20 * 1024 * 1024) {
+    throw new Error("INVALID_PDF");
+  }
+
+  const pdfId = randomId("pdf");
+  session.pdf_key = `sessions/${session.id}/pdf/${pdfId}.pdf`;
+  await c.env.R2.put(session.pdf_key, bytes, { httpMetadata: { contentType: "application/pdf" } });
+  const saved = await c.env.R2.head(session.pdf_key);
+  if (!saved) throw new Error("R2_PDF_SAVE_FAILED");
+  session.pdf = bytes;
+
+  if (c.env.DB) {
+    await c.env.DB.prepare(
+      "INSERT INTO pdfs (id, session_id, content_revision_id, artifact_id, template_version, r2_key, page_count, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
+    ).bind(pdfId, session.id, session.draft.revision_id, session.artifact_id, "letter_a4_v1", session.pdf_key, 1, new Date().toISOString()).run();
+  }
+}
 
 async function createMockPdf(session: Session): Promise<void> {
   const title = session.draft?.title ?? "手紙";
@@ -400,16 +478,45 @@ async function createMockPdf(session: Session): Promise<void> {
   session.pdf = new TextEncoder().encode(pdf);
 }
 
+app.post("/api/pdf/retry", zValidator("json", z.object({ expected_version: z.number().int(), idempotency_key: z.string().optional() })), async (c) => {
+  const session = await sessionForCookie(c);
+  if (!session) return c.json({ error: { code: "UNAUTHORIZED", message: "セッションがありません。", retryable: false } }, 403);
+  if (expireIfNeeded(session)) return c.json({ error: { code: "SESSION_EXPIRED", message: "セッションの期限が切れました。", retryable: false } }, 410);
+  const body = c.req.valid("json");
+  if (body.expected_version !== session.version) return c.json({ error: { code: "VERSION_CONFLICT", message: "画面状態が更新されています。", retryable: false } }, 409);
+  if (session.status !== "PDF_ERROR" || !session.draft?.approved) return c.json({ error: { code: "STATE_CONFLICT", message: "PDF再試行できる状態ではありません。", retryable: false } }, 409);
+  session.status = "PDF_RUNNING";
+  bump(session);
+  try {
+    if (c.env.MOCK_MODE !== "false") await createMockPdf(session);
+    else await createBrowserPdf(c, session);
+    session.status = "READY";
+    session.pdf_ready = true;
+  } catch {
+    session.status = "PDF_ERROR";
+  }
+  bump(session);
+  return c.json(toView(session));
+});
+
 app.get("/api/download", async (c) => {
   const session = await sessionForCookie(c);
   if (!session) return c.json({ error: { code: "UNAUTHORIZED", message: "セッションがありません。", retryable: false } }, 403);
-  if (!["READY", "COMPLETED"].includes(session.status) || !session.pdf_ready || !session.pdf) {
+  if (!["READY", "COMPLETED"].includes(session.status) || !session.pdf_ready) {
     return c.json({ error: { code: "PDF_NOT_READY", message: "PDFはまだ完成していません。", retryable: false } }, 409);
   }
+  let bytes = session.pdf;
+  if (!bytes && c.env.R2 && session.pdf_key) {
+    const object = await c.env.R2.get(session.pdf_key);
+    if (!object) return c.json({ error: { code: "PDF_OBJECT_MISSING", message: "保存されたPDFが見つかりません。", retryable: true } }, 503);
+    bytes = new Uint8Array(await object.arrayBuffer());
+  }
+  if (!bytes) return c.json({ error: { code: "PDF_NOT_READY", message: "PDFはまだ完成していません。", retryable: false } }, 409);
   c.header("Content-Type", "application/pdf");
   c.header("Content-Disposition", 'attachment; filename="letter.pdf"');
   c.header("Cache-Control", "no-store");
-  const buffer = session.pdf.buffer.slice(session.pdf.byteOffset, session.pdf.byteOffset + session.pdf.byteLength) as ArrayBuffer;
+  c.header("X-Content-Type-Options", "nosniff");
+  const buffer = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
   return c.body(buffer);
 });
 
