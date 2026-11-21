@@ -1,0 +1,8 @@
+AI/
+.editorconfig
+.gitattributes
+eslint.config.js
+eslint.config.js
+snippets/
+.markdownlint.json
+.vscode/
