@@ -175,8 +175,14 @@ app.post("/api/hearing/advance", zValidator("json", z.object({ expected_version:
     session.question = {
       id: randomId("q"),
       text: session.question_count === 0
-        ? "どんな気持ちを一番伝えたいですか？"
-        : "伝えるうえで大切にしたい具体的な出来事や言葉はありますか？"
+        ? "本当は何を一番伝えたいですか？"
+        : session.question_count === 1
+          ? "どんな場面でそう感じることが多いですか？"
+          : session.question_count === 2
+            ? "そのとき、いちばん近い気持ちは何ですか？"
+            : session.question_count === 3
+              ? "本当は相手にどうしてほしいですか？"
+              : "カードにするとしたら、強め・切ない・静かな怒り、どれが近いですか？"
     };
     session.question_count += 1;
     bump(session);
@@ -264,9 +270,9 @@ function generateMockDraft(c: Context<{ Bindings: Bindings }>, session: Session)
   const base = [session.initial_message, ...session.questions].filter(Boolean).join("\n");
   session.draft = {
     revision_id: randomId("rev"),
-    title: "あなたへ伝えたいこと",
-    contents: base.slice(0, 300),
-    image_brief: "柔らかな淡色の花と余白。文字は描かない。",
+    title: "察してほしいのに",
+    contents: base.slice(0, 60),
+    image_brief: "静かな怒りと寂しさを表す女性のカードイラスト。文字は描かない。",
     approved: false
   };
   session.status = "TEXT_REVIEW";
@@ -276,8 +282,8 @@ function generateMockDraft(c: Context<{ Bindings: Bindings }>, session: Session)
 }
 
 app.patch("/api/draft", zValidator("json", z.object({
-  title: z.string().trim().min(1).max(40),
-  contents: z.string().trim().min(1).max(300),
+  title: z.string().trim().min(1).max(24),
+  contents: z.string().trim().min(1).max(60),
   expected_version: z.number().int()
 })), async (c) => {
   const session = await sessionForCookie(c);

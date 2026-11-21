@@ -1,5 +1,6 @@
 import OpenAI from "openai";
 import { z } from "zod";
+import { HEARING_PROMPT_V2, WRITING_PROMPT_V2, IMAGE_PROMPT_V2 } from "./prompts";
 
 const hearingSchema = z.object({
   next_action: z.enum(["ask", "draft_ready"]),
@@ -10,8 +11,8 @@ const hearingSchema = z.object({
 });
 
 const contentSchema = z.object({
-  title: z.string().min(1).max(40),
-  contents: z.string().min(1).max(300),
+  title: z.string().min(1).max(24),
+  contents: z.string().min(1).max(60),
   image_brief: z.string().min(1).max(500)
 });
 
@@ -44,7 +45,7 @@ export async function askHearing(
 ): Promise<HearingResult> {
   const response = await client.responses.create({
     model,
-    instructions: "ユーザーの発言だけを根拠に、一度に一つだけ質問するか、十分な情報があれば文章化へ進む日本語の聞き取り担当です。質問数は最大5問です。返却JSON以外を出力しません。",
+    instructions: HEARING_PROMPT_V2,
     input: JSON.stringify({
       initial_message: initialMessage,
       answers,
@@ -82,7 +83,7 @@ export async function createContent(
 ): Promise<ContentResult> {
   const response = await client.responses.create({
     model,
-    instructions: "与えられた事実だけを使い、日本語の恋人向け手紙と文字なし装飾指示を作ります。未提供の事実や相手の心理を創作しません。",
+    instructions: WRITING_PROMPT_V2,
     input: JSON.stringify({ initial_message: initialMessage, answers }),
     text: {
       format: {
@@ -93,8 +94,8 @@ export async function createContent(
           type: "object",
           additionalProperties: false,
           properties: {
-            title: { type: "string" },
-            contents: { type: "string" },
+            title: { type: "string", minLength: 1, maxLength: 24 },
+            contents: { type: "string", minLength: 1, maxLength: 60 },
             image_brief: { type: "string" }
           },
           required: ["title", "contents", "image_brief"]
@@ -113,7 +114,7 @@ export async function generateDecoration(
 ): Promise<{ bytes: Uint8Array; mimeType: "image/png" }> {
   const response = await client.images.generate({
     model,
-    prompt: `文字・タイポグラフィ・ロゴ・サインを一切描かない装飾イラスト。スタイル: ${styleId}。${imageBrief}`,
+    prompt: `${IMAGE_PROMPT_V2}\nスタイル: ${styleId}\nイメージ指示: ${imageBrief}`,
     size: "1024x1536",
     output_format: "png",
     n: 1

@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { sessionViewSchema } from "../src/shared/schemas";
 import { parseHearingResult, parseContentResult } from "../src/worker/openai";
+import { LETTER_LAYOUT_LIMITS, renderLetterHtml, validateLetterLayout } from "../src/worker/render";
+import { HEARING_PROMPT_V2, WRITING_PROMPT_V2, IMAGE_PROMPT_V2 } from "../src/worker/prompts";
 
 describe("SessionView contract", () => {
   it("accepts a hearing snapshot", () => {
@@ -58,5 +60,31 @@ describe("OpenAI structured output", () => {
       contents: "本文",
       image_brief: "花"
     }))).toThrow();
+  });
+});
+
+describe("Letter A4 renderer", () => {
+  it("uses title and body limits that preserve the fixed layout", () => {
+    expect(LETTER_LAYOUT_LIMITS.title).toBe(24);
+    expect(LETTER_LAYOUT_LIMITS.contents).toBe(60);
+    expect(validateLetterLayout("ありがとう", "いつも話を聞いてくれてありがとう。")).toBe(true);
+  });
+
+  it("rejects oversized text and renders HTML overlay classes", () => {
+    expect(validateLetterLayout("a".repeat(25), "本文")).toBe(false);
+    expect(validateLetterLayout("タイトル", "a".repeat(61))).toBe(false);
+    const html = renderLetterHtml("ありがとう", "いつも話を聞いてくれてありがとう。", null, "minimal");
+    expect(html).toContain("class=\"letter-title\"");
+    expect(html).toContain("class=\"letter-body\"");
+    expect(html).toContain("class=\"letter-artwork letter-artwork-empty\"");
+    expect(html).toContain("@page { size: A4 portrait; margin: 0; }");
+  });
+});
+
+describe("Prompt versions", () => {
+  it("uses the v2 service prompts", () => {
+    expect(HEARING_PROMPT_V2).toContain("hearing-v2");
+    expect(WRITING_PROMPT_V2).toContain("writing-v2");
+    expect(IMAGE_PROMPT_V2).toContain("image-v2");
   });
 });

@@ -3,8 +3,11 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "wrangler dev",
-    "dev:real": "wrangler dev --var MOCK_MODE:false",
+    "dev": "concurrently -k -n worker,vite \"npm run dev:worker\" \"npm run dev:vite\"",
+    "dev:vite": "vite --host 127.0.0.1 --port 5173",
+    "dev:worker": "wrangler dev --port 8787 --local",
+    "dev:real": "concurrently -k -n worker,vite \"npm run dev:worker:real\" \"npm run dev:vite\"",
+    "dev:worker:real": "wrangler dev --port 8787 --local --var MOCK_MODE:false",
     "deploy": "npm run build && wrangler deploy",
     "build": "tsc -b && vite build",
     "typecheck": "tsc -b",
@@ -13,6 +16,7 @@
     "test:e2e": "playwright test"
   },
   "dependencies": {
+    "@fontsource/noto-sans-jp": "^5.3.1",
     "@hono/zod-validator": "^0.7.5",
     "hono": "^4.10.7",
     "openai": "^6.9.1",
@@ -23,11 +27,12 @@
   "devDependencies": {
     "@cloudflare/workers-types": "^5.20261121.1",
     "@eslint/js": "^9.39.1",
+    "@playwright/test": "^1.56.1",
     "@types/node": "^24.10.1",
     "@types/react": "^19.2.5",
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^5.1.1",
-    "@playwright/test": "^1.56.1",
+    "concurrently": "^10.0.7",
     "eslint": "^9.39.1",
     "playwright": "^1.56.1",
     "typescript": "~5.9.3",

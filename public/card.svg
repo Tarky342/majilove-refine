@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 179.58 252.94" preserveAspectRatio="none" role="img" aria-label="手紙の装飾テンプレート">
+  <rect x="-34.93" y="38.43" width="249.45" height="178.58"
+        rx="8.74" ry="8.74" transform="translate(217.51 37.93) rotate(90)"
+        fill="#fff" stroke="#db184e" stroke-miterlimit="10"/>
+  <rect x="18.92" y="12.06" width="141.73" height="85.04"
+        fill="none" stroke="#edb2c7" stroke-miterlimit="10"/>
+  <line x1="28.14" y1="134.39" x2="147.37" y2="134.39"
+        fill="none" stroke="#db184e" stroke-miterlimit="10"/>
+  <line x1="28.14" y1="220.06" x2="147.37" y2="220.06"
+        fill="none" stroke="#db184e" stroke-miterlimit="10"/>
+  <text x="137.45" y="233.97" fill="#231815"
+        font-family="Yu Gothic,Hiragino Sans,MS Gothic,sans-serif"
+        font-size="8">AP:00</text>
+</svg>

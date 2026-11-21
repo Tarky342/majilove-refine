@@ -8,21 +8,31 @@ type SessionView = {
   status: string;
   question_count: number;
   question: { id: string; text: string } | null;
-  draft: { revision_id: string; title: string; contents: string; image_brief: string; approved: boolean } | null;
+  draft: {
+    revision_id: string;
+    title: string;
+    contents: string;
+    image_brief: string;
+    approved: boolean;
+  } | null;
   artwork: { artifact_id: string; preview_url: string } | null;
   artwork_choice: "pending" | "generated" | "none";
   pdf_ready: boolean;
   expires_at: string;
 };
 
-async function api(path: string, init?: RequestInit): Promise<{ view?: SessionView; response: Response }> {
+async function api(
+  path: string,
+  init?: RequestInit,
+): Promise<{ view?: SessionView; response: Response }> {
   const response = await fetch(path, {
     ...init,
-    headers: { "Content-Type": "application/json", ...(init?.headers ?? {}) }
+    headers: { "Content-Type": "application/json", ...(init?.headers ?? {}) },
   });
   if (response.status === 204) return { response };
   const data = await response.json();
-  if (!response.ok) throw Object.assign(new Error(data.error?.message ?? "処理に失敗しました。"), data);
+  if (!response.ok)
+    throw Object.assign(new Error(data.error?.message ?? "処理に失敗しました。"), data);
   return { view: data as SessionView, response };
 }
 
@@ -58,15 +68,30 @@ function App() {
     }
   }, [view?.draft?.revision_id]);
 
+  useEffect(() => {
+    if (view?.status === "HEARING" && view.question === null && !loading) {
+      void advance();
+    }
+  }, [view?.status, view?.question, view?.version, loading]);
+
   async function start() {
     setLoading(true);
     setError("");
     try {
       const result = await api("/api/sessions", {
         method: "POST",
-        body: JSON.stringify({ initial_message: initial, consent_to_ai: consent })
+        body: JSON.stringify({ initial_message: initial, consent_to_ai: consent }),
       });
-      setView(result.view ?? null);
+      const started = result.view;
+      if (!started) throw new Error("セッションを開始できませんでした。");
+      const advanceResult = await api("/api/hearing/advance", {
+        method: "POST",
+        body: JSON.stringify({
+          expected_version: started.version,
+          idempotency_key: crypto.randomUUID(),
+        }),
+      });
+      setView(advanceResult.view ?? started);
     } catch (e) {
       setError(e instanceof Error ? e.message : "開始できませんでした。");
     } finally {
@@ -81,7 +106,10 @@ function App() {
     try {
       const result = await api("/api/hearing/advance", {
         method: "POST",
-        body: JSON.stringify({ expected_version: view.version, idempotency_key: crypto.randomUUID() })
+        body: JSON.stringify({
+          expected_version: view.version,
+          idempotency_key: crypto.randomUUID(),
+        }),
       });
       setView(result.view ?? null);
     } catch (e) {
@@ -102,11 +130,20 @@ function App() {
           question_id: view.question.id,
           answer,
           expected_version: view.version,
-          idempotency_key: crypto.randomUUID()
-        })
+          idempotency_key: crypto.randomUUID(),
+        }),
       });
+      const answered = result.view;
       setAnswer("");
-      setView(result.view ?? null);
+      if (!answered) throw new Error("回答を保存できませんでした。");
+      const next = await api("/api/hearing/advance", {
+        method: "POST",
+        body: JSON.stringify({
+          expected_version: answered.version,
+          idempotency_key: crypto.randomUUID(),
+        }),
+      });
+      setView(next.view ?? answered);
     } catch (e) {
       setError(e instanceof Error ? e.message : "回答を保存できませんでした。");
     } finally {
@@ -121,7 +158,10 @@ function App() {
     try {
       const result = await api("/api/draft/generate", {
         method: "POST",
-        body: JSON.stringify({ expected_version: view.version, idempotency_key: crypto.randomUUID() })
+        body: JSON.stringify({
+          expected_version: view.version,
+          idempotency_key: crypto.randomUUID(),
+        }),
       });
       setView(result.view ?? null);
     } catch (e) {
@@ -138,7 +178,7 @@ function App() {
     try {
       const result = await api("/api/draft", {
         method: "PATCH",
-        body: JSON.stringify({ title, contents, expected_version: view.version })
+        body: JSON.stringify({ title, contents, expected_version: view.version }),
       });
       setView(result.view ?? null);
     } catch (e) {
@@ -158,8 +198,8 @@ function App() {
         body: JSON.stringify({
           content_revision_id: view.draft.revision_id,
           expected_version: view.version,
-          idempotency_key: crypto.randomUUID()
-        })
+          idempotency_key: crypto.randomUUID(),
+        }),
       });
       setView(result.view ?? null);
     } catch (e) {
@@ -177,7 +217,11 @@ function App() {
       const artifactId = view.artwork?.artifact_id ?? null;
       const result = await api("/api/image/approve", {
         method: "POST",
-        body: JSON.stringify({ artifact_id: artifactId, expected_version: view.version, idempotency_key: crypto.randomUUID() })
+        body: JSON.stringify({
+          artifact_id: artifactId,
+          expected_version: view.version,
+          idempotency_key: crypto.randomUUID(),
+        }),
       });
       setView(result.view ?? null);
     } catch (e) {
@@ -198,7 +242,7 @@ function App() {
     try {
       const result = await api("/api/complete", {
         method: "POST",
-        body: JSON.stringify({ expected_version: view.version })
+        body: JSON.stringify({ expected_version: view.version }),
       });
       setView(result.view ?? null);
     } finally {
@@ -213,7 +257,10 @@ function App() {
     try {
       const result = await api("/api/image/skip", {
         method: "POST",
-        body: JSON.stringify({ expected_version: view.version, idempotency_key: crypto.randomUUID() })
+        body: JSON.stringify({
+          expected_version: view.version,
+          idempotency_key: crypto.randomUUID(),
+        }),
       });
       setView(result.view ?? null);
     } catch (e) {
@@ -230,7 +277,10 @@ function App() {
     try {
       const result = await api("/api/pdf/retry", {
         method: "POST",
-        body: JSON.stringify({ expected_version: view.version, idempotency_key: crypto.randomUUID() })
+        body: JSON.stringify({
+          expected_version: view.version,
+          idempotency_key: crypto.randomUUID(),
+        }),
       });
       setView(result.view ?? null);
     } catch (e) {
@@ -243,103 +293,190 @@ function App() {
   return (
     <main>
       <header>
-        <p className="eyebrow">LOVE LETTER PDF</p>
         <h1>彼氏に伝えたいことは？</h1>
       </header>
-      {error && <div className="error" role="alert">{error}</div>}
+      {error && (
+        <div className="error" role="alert">
+          {error}
+        </div>
+      )}
 
-      {!view && (
-        <section className="card">
-          <label htmlFor="initial">伝えたいこと</label>
-          <textarea id="initial" value={initial} onChange={(e) => setInitial(e.target.value)} maxLength={1000} placeholder="自然な言葉で書いてください" />
-          <label className="check"><input type="checkbox" checked={consent} onChange={(e) => setConsent(e.target.checked)} />この内容をAIで処理することに同意します</label>
-          <button disabled={loading || !consent || !initial.trim()} onClick={() => void start()}>ヒアリングを始める</button>
+      {loading && (
+        <section className="card hearing-loading" aria-live="polite" aria-busy="true">
+          <div className="loading-step"></div>
+          <div className="skeleton skeleton-question"></div>
+          <div className="skeleton skeleton-answer"></div>
+          <div className="loading-actions">
+            <div className="skeleton skeleton-button"></div>
+            <div className="skeleton skeleton-button"></div>
+          </div>
+          <p>送信しています</p>
         </section>
       )}
 
-      {view?.status === "HEARING" && (
+      {!loading && !view && (
+        <section className="card">
+          <label htmlFor="initial">伝えたいこと</label>
+          <br />
+          <textarea
+            id="initial"
+            value={initial}
+            onChange={(e) => setInitial(e.target.value)}
+            maxLength={1000}
+            placeholder="自然な言葉で書いてください"
+          />
+          <br />
+          <label className="check">
+            <input
+              type="checkbox"
+              checked={consent}
+              onChange={(e) => setConsent(e.target.checked)}
+            />
+            この内容をAIで処理することに同意します
+          </label>
+          <br />
+          <button disabled={loading || !consent || !initial.trim()} onClick={() => void start()}>
+            ヒアリングを始める
+          </button>
+        </section>
+      )}
+
+      {!loading && view?.status === "HEARING" && (
         <section className="card">
           <p className="step">質問 {view.question_count}/5</p>
           {view.question ? (
             <>
               <h2>{view.question.text}</h2>
-              <textarea value={answer} onChange={(e) => setAnswer(e.target.value)} maxLength={1500} />
+              <textarea
+                value={answer}
+                onChange={(e) => setAnswer(e.target.value)}
+                maxLength={1500}
+              />
               <div className="actions">
-                <button disabled={loading || !answer.trim()} onClick={() => void submitAnswer()}>回答する</button>
-                <button className="secondary" disabled={loading} onClick={() => void generateDraft()}>この内容で文章化</button>
+                <button disabled={loading || !answer.trim()} onClick={() => void submitAnswer()}>
+                  回答する
+                </button>
+                <button
+                  className="secondary"
+                  disabled={loading}
+                  onClick={() => void generateDraft()}
+                >
+                  この内容で文章化
+                </button>
               </div>
             </>
-          ) : (
-            <button disabled={loading} onClick={() => void advance()}>次へ</button>
-          )}
+          ) : null}
         </section>
       )}
 
-      {view?.status === "TEXT_REVIEW" && view.draft && (
+      {!loading && view?.status === "TEXT_REVIEW" && view.draft && (
         <section className="card">
           <p className="step">文章の確認</p>
           <label htmlFor="title">タイトル</label>
-          <input id="title" value={title} onChange={(e) => setTitle(e.target.value)} maxLength={40} />
+          <input
+            id="title"
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+            maxLength={24}
+          />
           <label htmlFor="contents">本文</label>
-          <textarea id="contents" value={contents} onChange={(e) => setContents(e.target.value)} maxLength={300} />
+          <textarea
+            id="contents"
+            value={contents}
+            onChange={(e) => setContents(e.target.value)}
+            maxLength={60}
+          />
           <div className="actions">
-            <button className="secondary" disabled={loading} onClick={() => void saveDraft()}>編集を新しい文章として保存</button>
-            <button disabled={loading} onClick={() => void approveDraft()}>この文章を承認</button>
+            <button className="secondary" disabled={loading} onClick={() => void saveDraft()}>
+              編集を新しい文章として保存
+            </button>
+            <button disabled={loading} onClick={() => void approveDraft()}>
+              この文章を承認
+            </button>
           </div>
         </section>
       )}
 
-      {view?.status === "ART_REVIEW" && (
+      {!loading && view?.status === "ART_REVIEW" && (
         <section className="card">
           <p className="step">仕上がり見本</p>
-          {view.artwork && <img className="preview" src="/api/image/current" alt="装飾画像の見本" />}
-          <article className="letter">
-            <h2>{view.draft?.title}</h2>
-            <p>{view.draft?.contents}</p>
+          <article className="letter-page letter-preview">
+            <img className="letter-template" src="/card.svg" alt="" aria-hidden="true" />
+            {view.artwork ? (
+              <img
+                className="letter-artwork"
+                src="/api/image/current"
+                alt="装飾画像の見本"
+              />
+            ) : (
+              <div className="letter-artwork letter-artwork-empty" aria-hidden="true" />
+            )}
+            <h1 className="letter-title">{view.draft?.title}</h1>
+            <div className="letter-body">{view.draft?.contents}</div>
           </article>
           <div className="actions">
-            <button disabled={loading} onClick={() => void approveArtwork()}>見た目を承認してPDF作成</button>
+            <button disabled={loading} onClick={() => void approveArtwork()}>
+              見た目を承認してPDF作成
+            </button>
           </div>
         </section>
       )}
 
-      {view?.status === "READY" && (
+      {!loading && view?.status === "READY" && (
         <section className="card success">
           <p className="step">PDFの準備ができました</p>
-          <a className="button" href="/api/download">PDFをダウンロード</a>
-          <button disabled={loading} onClick={() => void complete()}>完了</button>
+          <a className="button" href="/api/download">
+            PDFをダウンロード
+          </a>
+          <button disabled={loading} onClick={() => void complete()}>
+            完了
+          </button>
         </section>
       )}
 
-      {view?.status === "IMAGE_ERROR" && (
+      {!loading && view?.status === "IMAGE_ERROR" && (
         <section className="card">
           <p className="step">画像を生成できませんでした</p>
           <p>再試行するか、装飾なしで進めます。</p>
           <div className="actions">
-            <button className="secondary" disabled={loading} onClick={() => void skipImage()}>画像なしで進む</button>
+            <button className="secondary" disabled={loading} onClick={() => void skipImage()}>
+              画像なしで進む
+            </button>
           </div>
         </section>
       )}
 
-      {view?.status === "PDF_ERROR" && (
+      {!loading && view?.status === "PDF_ERROR" && (
         <section className="card">
           <p className="step">PDFを作成できませんでした</p>
           <div className="actions">
-            <button disabled={loading} onClick={() => void retryPdf()}>PDFを再試行</button>
+            <button disabled={loading} onClick={() => void retryPdf()}>
+              PDFを再試行
+            </button>
           </div>
         </section>
       )}
 
-      {view?.status === "COMPLETED" && (
+      {!loading && view?.status === "COMPLETED" && (
         <section className="card success">
           <p className="step">完了</p>
-          <a className="button" href="/api/download">PDFをもう一度ダウンロード</a>
+          <a className="button" href="/api/download">
+            PDFをもう一度ダウンロード
+          </a>
         </section>
       )}
 
-      {view && <button className="cancel" disabled={loading} onClick={() => void cancel()}>中止して削除</button>}
+      {!loading && view && (
+        <button className="cancel" disabled={loading} onClick={() => void cancel()}>
+          中止して削除
+        </button>
+      )}
     </main>
   );
 }
 
-createRoot(document.getElementById("root")!).render(<React.StrictMode><App /></React.StrictMode>);
+createRoot(document.getElementById("root")!).render(
+  <React.StrictMode>
+    <App />
+  </React.StrictMode>,
+);

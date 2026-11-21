@@ -6,5 +6,6 @@ test("starts a mock session and reaches the hearing screen", async ({ page }) =>
   await page.getByLabel("伝えたいこと").fill("いつも話を聞いてくれてありがとう");
   await page.getByLabel("この内容をAIで処理することに同意します").check();
   await page.getByRole("button", { name: "ヒアリングを始める" }).click();
-  await expect(page.getByRole("button", { name: "次へ" })).toBeVisible();
+  await expect(page.getByText("質問 1/5")).toBeVisible();
+  await expect(page.getByRole("button", { name: "次へ" })).toHaveCount(0);
 });

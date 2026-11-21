@@ -1,0 +1,76 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  【マージの原則】
+  このSVGは「背景・枠線・区切り線・固定フッター」のみを描く。
+  HTML上でSVGをA4の背景として配置し、その上に実際のHTML文字列と画像を重ねる。
+  文章はcontent.title / content.contents、画像は承認済みartifactを使う。
+  HTMLプレビューとPDF出力は同じレンダリング関数・CSSを使う。
+
+  HTMLオーバーレイの位置はviewBoxから比例換算する。画面幅に固定pxで合わせない。
+
+  【重要】ユーザー文面・OpenAI出力・画像のbase64をSVGソースに直接置換しない。
+  SVGは固定アセットとして保持し、HTMLで安全にエスケープした文字列を重ねる。
+-->
+<svg id="letter_a4_merge_v1"
+     xmlns="http://www.w3.org/2000/svg"
+     viewBox="0 0 179.58 252.94"
+     width="210mm" height="297mm"
+     preserveAspectRatio="none"
+     role="img" aria-label="手紙の装飾テンプレート">
+  <defs>
+    <style>
+      .frame { fill: #fff; stroke: #db184e; stroke-miterlimit: 10; }
+      .image-border { fill: none; stroke: #edb2c7; stroke-miterlimit: 10; }
+      .divider { fill: none; stroke: #db184e; stroke-miterlimit: 10; }
+      .fixed-footer {
+        fill: #231815;
+        font-family: KozGoPr6N-Regular-90ms-RKSJ-H, 'Kozuka Gothic Pr6N', sans-serif;
+        font-size: 8px;
+      }
+    </style>
+  </defs>
+
+  <g id="letter-decorations">
+    <!-- [固定] 元SVGの外枠。形状・色・回転・座標を変更しない。 -->
+    <rect id="page-border" class="frame"
+          x="-34.93" y="38.43" width="249.45" height="178.58"
+          rx="8.74" ry="8.74" transform="translate(217.51 37.93) rotate(90)"/>
+
+    <!--
+      [画像スロット] ここにSVGのimage要素を生成しない。HTMLのimgを重ねる。
+      viewBox座標: x=18.92, y=12.06, 幅=141.73, 高さ=85.04。
+      生成画像は枠の内側でobject-fit:cover。枠線が隠れないよう画像をわずかに内側へ。
+      画像なしでも枠線は残す。枠の色・座標は変更しない。
+    -->
+    <rect id="image-guide" class="image-border"
+          x="18.92" y="12.06" width="141.73" height="85.04"/>
+
+    <!--
+      HTMLのcontent.titleを、元の表示開始 x=28.14 / ベースライン y=125.18 を基準に重ねる。
+      下の区切り線 y=134.39 と衝突しないように行数・フォントサイズを制御する。
+      SVGの固定textに文字を埋め込む方式は使わない。
+    -->
+
+    <!-- [固定] タイトル下の区切り線。変更しない。 -->
+    <line id="title-divider" class="divider"
+          x1="28.14" y1="134.39" x2="147.37" y2="134.39"/>
+
+    <!--
+      HTMLのcontent.contentsを別要素として配置する。
+      元テキストの開始 x=27.43 / 最初のベースライン y=154.31、元行間17.5。
+      文字領域は左右およそ x=27.43..147.37、下限は区切り線 y=220.06。
+      CSSはwhite-space:pre-wrap、禁則処理、日本語フォント、はみ出し検出に対応。
+      文字が入りきらない場合は明示的に2ページ目へ送るかエラー。黙って欠落させない。
+    -->
+
+    <!-- [固定] 本文下の区切り線。変更しない。 -->
+    <line id="body-divider" class="divider"
+          x1="28.14" y1="220.06" x2="147.37" y2="220.06"/>
+
+    <!--
+      [絶対変更禁止] フッター「AP:00」。元SVGと同じ文字・座標・書式を保持する。
+      生成本文やページ番号に置換しない。表示時も常に可視とする。
+    -->
+    <text id="footer-ap00" class="fixed-footer" transform="translate(137.45 233.97)"><tspan x="0" y="0">AP:00</tspan></text>
+  </g>
+</svg>

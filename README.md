@@ -10,7 +10,8 @@ npm run build
 npm run dev
 ```
 
-ブラウザで `http://127.0.0.1:8787` を開きます。
+ブラウザで `http://127.0.0.1:5173` を開きます。Viteが画面をホットリロードし、`/api`は `http://127.0.0.1:8787` のWorkerへプロキシします。
+Workerのみを確認する場合は `http://127.0.0.1:8787` を開けます。
 
 ## Cloudflare bindings
 

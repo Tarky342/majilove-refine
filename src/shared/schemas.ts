@@ -17,8 +17,8 @@ export const sessionStatusSchema = z.enum([
 export type SessionStatus = z.infer<typeof sessionStatusSchema>;
 
 export const draftSchema = z.object({
-  title: z.string().min(1).max(40),
-  contents: z.string().min(1).max(300),
+  title: z.string().min(1).max(24),
+  contents: z.string().min(1).max(60),
   image_brief: z.string().min(1).max(500)
 });
 
