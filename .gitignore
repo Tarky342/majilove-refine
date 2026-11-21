@@ -6,3 +6,4 @@ eslint.config.js
 snippets/
 .markdownlint.json
 .vscode/
+node_modules/
