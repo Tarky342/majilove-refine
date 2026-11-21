@@ -34,6 +34,50 @@ npx wrangler d1 migrations apply letter-pdf-db --local
 
 実モードでローカル確認する場合は `npm run dev:real` を使用します。
 
+## Workers & Pages デプロイ
+
+デプロイ前に次を確認します。
+
+1. Cloudflare DashboardでR2を有効化し、`letter-pdf-private`バケットを作成する
+2. OpenAIキーをWorker Secretへ登録する
+3. 本番D1 migrationを適用する
+4. `npm run deploy`でビルドとデプロイを実行する
+
+OpenAIキーの登録例:
+
+```powershell
+npx wrangler secret put OPENAI_API_KEY --name letter-pdf-app
+```
+
+ローカルのキーを安全に登録する場合は、キー文字列をチャットやログに貼らず、`.dev.vars`から値だけをパイプで渡します。
+
+本番D1 migration:
+
+```powershell
+npx wrangler d1 migrations apply letter-pdf-db --remote
+```
+
+### R2の詳細手順
+
+1. [Cloudflare Dashboard](https://dash.cloudflare.com/)を開き、現在のアカウントを選択します。
+2. 左メニューから **R2 object storage** を開きます。
+3. 初回利用時は **Purchase R2** または **Enable R2** を押して、R2を有効化します。
+4. **Create bucket** を押し、名前に `letter-pdf-private` を入力して作成します。
+5. バケット設定を開き、**Public Development URL** と **Custom domain** が無効になっていることを確認します。
+6. ターミナルで次を実行し、バケットを検証します。
+
+```powershell
+npx wrangler r2 bucket list
+```
+
+`letter-pdf-private` が一覧に表示されたら、次で再デプロイします。
+
+```powershell
+npx wrangler d1 migrations apply letter-pdf-db --remote
+npm run deploy
+npx wrangler deployments list --name letter-pdf-app
+```
+
 ## セットアップ前提
 
 - Node.js 24以上

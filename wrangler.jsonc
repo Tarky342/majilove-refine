@@ -7,27 +7,34 @@
     "directory": "./dist/client",
     "binding": "ASSETS",
     "not_found_handling": "single-page-application",
-    "run_worker_first": true
+    "run_worker_first": true,
   },
   "d1_databases": [
     {
       "binding": "DB",
       "database_name": "letter-pdf-db",
-      "database_id": "fb79ab71-552a-4d25-bb1e-660fa6d5e529"
-    }
+      "database_id": "fb79ab71-552a-4d25-bb1e-660fa6d5e529",
+    },
   ],
   "r2_buckets": [
     {
       "binding": "R2",
-      "bucket_name": "letter-pdf-private"
-    }
+      "bucket_name": "letter-pdf-private",
+    },
   ],
   "browser": {
-    "binding": "BROWSER"
+    "binding": "BROWSER",
   },
   "vars": {
     "MODEL_TEXT": "gpt-6.1-terra",
     "MODEL_IMAGE": "gpt-image-2.6-flare",
-    "MOCK_MODE": "true"
-  }
+    "MOCK_MODE": "false",
+  },
+
+  "observability": {
+    "logs": {
+      "enabled": true,
+      "invocation_logs": true,
+    },
+  },
 }
