@@ -12,7 +12,6 @@
   "d1_databases": [
     {
       "binding": "DB",
-      "database_name": "letter-pdf-db",
       "database_id": "fb79ab71-552a-4d25-bb1e-660fa6d5e529",
     },
   ],
@@ -28,7 +27,7 @@
   "vars": {
     "MODEL_TEXT": "gpt-6.1-terra",
     "MODEL_IMAGE": "gpt-image-2.6-flare",
-    "MOCK_MODE": "false",
+    "MOCK_MODE": "true",
   },
 
   "observability": {

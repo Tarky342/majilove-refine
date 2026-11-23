@@ -1,133 +1,84 @@
 import OpenAI from "openai";
 import { z } from "zod";
-import { HEARING_PROMPT_V2, WRITING_PROMPT_V2, IMAGE_PROMPT_V2 } from "./prompts";
+import { cardSchema, cardSetSchema, type Card, type Emotion, type InputEntry } from "../shared/schemas";
+import { WRITING_PROMPT_V3, IMAGE_PROMPT_V3 } from "./prompts";
 
-const hearingSchema = z.object({
-  next_action: z.enum(["ask", "draft_ready"]),
-  question: z.string(),
-  summary: z.string(),
-  key_facts: z.array(z.string()),
-  tone: z.string()
-});
+const singleCardSchema = z.object({ card: cardSchema });
+export type CardSet = z.infer<typeof cardSetSchema>;
 
-const contentSchema = z.object({
-  title: z.string().min(1).max(24),
-  contents: z.string().min(1).max(60),
-  image_brief: z.string().min(1).max(500)
-});
-
-export type HearingResult = z.infer<typeof hearingSchema>;
-export type ContentResult = z.infer<typeof contentSchema>;
-
-export function parseHearingResult(text: string): HearingResult {
-  return hearingSchema.parse(JSON.parse(text));
+export function parseCardSet(text: string): CardSet {
+  return cardSetSchema.parse(JSON.parse(text));
 }
 
-export function parseContentResult(text: string): ContentResult {
-  return contentSchema.parse(JSON.parse(text));
-}
-
-export function getOpenAIKey(env: { OPENAI_API_KEY?: string }): string | undefined {
-  return env.OPENAI_API_KEY;
+export function parseCard(text: string): Card {
+  return singleCardSchema.parse(JSON.parse(text)).card;
 }
 
 export function createOpenAI(env: { OPENAI_API_KEY?: string }): OpenAI | null {
-  const apiKey = getOpenAIKey(env);
-  return apiKey ? new OpenAI({ apiKey }) : null;
+  return env.OPENAI_API_KEY ? new OpenAI({ apiKey: env.OPENAI_API_KEY }) : null;
 }
 
-export async function askHearing(
-  client: OpenAI,
-  model: string,
-  initialMessage: string,
-  answers: string[],
-  questionCount: number
-): Promise<HearingResult> {
-  const response = await client.responses.create({
-    model,
-    instructions: HEARING_PROMPT_V2,
-    input: JSON.stringify({
-      initial_message: initialMessage,
-      answers,
-      question_count: questionCount,
-      max_questions: 5
-    }),
-    text: {
-      format: {
-        type: "json_schema",
-        name: "hearing_result",
-        strict: true,
-        schema: {
-          type: "object",
-          additionalProperties: false,
-          properties: {
-            next_action: { type: "string", enum: ["ask", "draft_ready"] },
-            question: { type: "string" },
-            summary: { type: "string" },
-            key_facts: { type: "array", items: { type: "string" } },
-            tone: { type: "string" }
-          },
-          required: ["next_action", "question", "summary", "key_facts", "tone"]
-        }
+const cardJsonSchema = {
+  type: "object", additionalProperties: false,
+  properties: {
+    cards: {
+      type: "array", minItems: 4, maxItems: 4,
+      items: {
+        type: "object", additionalProperties: false,
+        properties: {
+          emotion: { type: "string", enum: ["joy", "anger", "sadness", "fun"] },
+          title: { type: "string", minLength: 1, maxLength: 24 },
+          contents: { type: "string", minLength: 1, maxLength: 60 },
+          image_brief: { type: "string", minLength: 1, maxLength: 400 }
+        },
+        required: ["emotion", "title", "contents", "image_brief"]
       }
     }
-  });
-  return parseHearingResult(response.output_text);
-}
+  },
+  required: ["cards"]
+} as const;
 
-export async function createContent(
-  client: OpenAI,
-  model: string,
-  initialMessage: string,
-  answers: string[]
-): Promise<ContentResult> {
+export async function createCardSet(client: OpenAI, model: string, entries: InputEntry[]): Promise<CardSet> {
   const response = await client.responses.create({
     model,
-    instructions: WRITING_PROMPT_V2,
-    input: JSON.stringify({ initial_message: initialMessage, answers }),
-    text: {
-      format: {
-        type: "json_schema",
-        name: "letter_content",
-        strict: true,
-        schema: {
-          type: "object",
-          additionalProperties: false,
-          properties: {
-            title: { type: "string", minLength: 1, maxLength: 24 },
-            contents: { type: "string", minLength: 1, maxLength: 60 },
-            image_brief: { type: "string" }
-          },
-          required: ["title", "contents", "image_brief"]
-        }
-      }
-    }
+    instructions: WRITING_PROMPT_V3,
+    input: JSON.stringify({ mode: "all", entries }),
+    text: { format: { type: "json_schema", name: "card_set", strict: true, schema: cardJsonSchema } }
   });
-  return parseContentResult(response.output_text);
+  return parseCardSet(response.output_text);
 }
 
-export async function generateDecoration(
-  client: OpenAI,
-  model: string,
-  imageBrief: string,
-  styleId: string
+export async function regenerateCard(client: OpenAI, model: string, entry: InputEntry): Promise<Card> {
+  const response = await client.responses.create({
+    model,
+    instructions: WRITING_PROMPT_V3,
+    input: JSON.stringify({ mode: "single", emotion: entry.emotion, entries: [entry] }),
+    text: { format: { type: "json_schema", name: "card", strict: true, schema: {
+      type: "object", additionalProperties: false,
+      properties: { card: cardJsonSchema.properties.cards.items },
+      required: ["card"]
+    } } }
+  });
+  const card = parseCard(response.output_text);
+  if (card.emotion !== entry.emotion) throw new Error("EMOTION_MISMATCH");
+  return card;
+}
+
+export async function generateImage(
+  client: OpenAI, model: string, emotion: Emotion, imageBrief: string
 ): Promise<{ bytes: Uint8Array; mimeType: "image/png" }> {
   const response = await client.images.generate({
     model,
-    prompt: `${IMAGE_PROMPT_V2}\nスタイル: ${styleId}\nイメージ指示: ${imageBrief}`,
-    size: "1024x1536",
-    output_format: "png",
-    n: 1
+    prompt: `${IMAGE_PROMPT_V3}\n対象感情: ${emotion}\nイメージ指示: ${imageBrief}`,
+    size: "1536x1024", output_format: "png", n: 1
   });
   const base64 = response.data?.[0]?.b64_json;
   if (!base64) throw new Error("IMAGE_RESPONSE_MISSING");
   const binary = atob(base64);
-  const bytes = new Uint8Array(binary.length);
-  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-  if (bytes.length < 8 ||
-      bytes[0] !== 0x89 || bytes[1] !== 0x50 || bytes[2] !== 0x4e || bytes[3] !== 0x47 ||
-      bytes[4] !== 0x0d || bytes[5] !== 0x0a || bytes[6] !== 0x1a || bytes[7] !== 0x0a ||
-      bytes.length > 6 * 1024 * 1024) {
+  const bytes = Uint8Array.from(binary, (char) => char.charCodeAt(0));
+  if (bytes.length < 8 || bytes[0] !== 0x89 || bytes[1] !== 0x50 || bytes[2] !== 0x4e ||
+      bytes[3] !== 0x47 || bytes[4] !== 0x0d || bytes[5] !== 0x0a ||
+      bytes[6] !== 0x1a || bytes[7] !== 0x0a || bytes.length > 6 * 1024 * 1024) {
     throw new Error("INVALID_PNG");
   }
   return { bytes, mimeType: "image/png" };

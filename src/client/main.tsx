@@ -2,479 +2,267 @@ import React, { useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 import "./styles.css";
 
-type SessionView = {
+type Emotion = "joy" | "anger" | "sadness" | "fun";
+const emotions: Emotion[] = ["joy", "anger", "sadness", "fun"];
+const labels: Record<Emotion, string> = { joy: "喜", anger: "怒", sadness: "哀", fun: "楽" };
+type Entry = { emotion: Emotion; note: string; scene: string; wish: string };
+type Card = { emotion: Emotion; title: string; contents: string; image_brief: string };
+type View = {
+  schema_version: 2;
   session_id: string;
   version: number;
   status: string;
-  question_count: number;
-  question: { id: string; text: string } | null;
-  draft: {
-    revision_id: string;
-    title: string;
-    contents: string;
-    image_brief: string;
-    approved: boolean;
-  } | null;
-  artwork: { artifact_id: string; preview_url: string } | null;
-  artwork_choice: "pending" | "generated" | "none";
+  inputs: Entry[];
+  card_set: { revision_id: string; approved: boolean; cards: Card[] } | null;
+  images: { emotion: Emotion; status: string; preview_url: string | null }[];
   pdf_ready: boolean;
+  last_error: { code: string } | null;
   expires_at: string;
 };
+const empty = (): Entry[] =>
+  emotions.map((emotion) => ({ emotion, note: "", scene: "", wish: "" }));
 
-async function api(
-  path: string,
-  init?: RequestInit,
-): Promise<{ view?: SessionView; response: Response }> {
+async function request(path: string, init?: RequestInit): Promise<View> {
   const response = await fetch(path, {
     ...init,
     headers: { "Content-Type": "application/json", ...(init?.headers ?? {}) },
   });
-  if (response.status === 204) return { response };
-  const data = await response.json();
-  if (!response.ok)
-    throw Object.assign(new Error(data.error?.message ?? "処理に失敗しました。"), data);
-  return { view: data as SessionView, response };
+  const body = response.status === 204 ? null : await response.json();
+  if (!response.ok) throw new Error(body?.error?.message ?? "処理に失敗しました。");
+  return body as View;
 }
 
 function App() {
-  const [view, setView] = useState<SessionView | null>(null);
-  const [initial, setInitial] = useState("");
+  const [view, setView] = useState<View | null>(null);
+  const [entries, setEntries] = useState(empty);
+  const [cards, setCards] = useState<Card[]>([]);
   const [consent, setConsent] = useState(false);
-  const [answer, setAnswer] = useState("");
-  const [title, setTitle] = useState("");
-  const [contents, setContents] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
-
-  async function refresh() {
-    try {
-      const response = await fetch("/api/sessions/current");
-      if (response.status === 403) return;
-      if (!response.ok) throw new Error("セッションを復元できませんでした。");
-      setView(await response.json());
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "通信に失敗しました。");
-    }
-  }
-
   useEffect(() => {
-    void refresh();
+    void fetch("/api/sessions/current").then(async (r) => r.ok && setView(await r.json()));
   }, []);
-
   useEffect(() => {
-    if (view?.draft) {
-      setTitle(view.draft.title);
-      setContents(view.draft.contents);
-    }
-  }, [view?.draft?.revision_id]);
-
-  useEffect(() => {
-    if (view?.status === "HEARING" && view.question === null && !loading) {
-      void advance();
-    }
-  }, [view?.status, view?.question, view?.version, loading]);
-
-  async function start() {
+    if (view?.inputs) setEntries(view.inputs);
+    if (view?.card_set) setCards(view.card_set.cards);
+  }, [view]);
+  const run = async (action: () => Promise<View>) => {
     setLoading(true);
     setError("");
     try {
-      const result = await api("/api/sessions", {
-        method: "POST",
-        body: JSON.stringify({ initial_message: initial, consent_to_ai: consent }),
-      });
-      const started = result.view;
-      if (!started) throw new Error("セッションを開始できませんでした。");
-      const advanceResult = await api("/api/hearing/advance", {
-        method: "POST",
-        body: JSON.stringify({
-          expected_version: started.version,
-          idempotency_key: crypto.randomUUID(),
-        }),
-      });
-      setView(advanceResult.view ?? started);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "開始できませんでした。");
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  async function advance() {
-    if (!view) return;
-    setLoading(true);
-    setError("");
-    try {
-      const result = await api("/api/hearing/advance", {
-        method: "POST",
-        body: JSON.stringify({
-          expected_version: view.version,
-          idempotency_key: crypto.randomUUID(),
-        }),
-      });
-      setView(result.view ?? null);
+      setView(await action());
     } catch (e) {
       setError(e instanceof Error ? e.message : "通信に失敗しました。");
     } finally {
       setLoading(false);
     }
-  }
-
-  async function submitAnswer() {
-    if (!view?.question) return;
-    setLoading(true);
-    setError("");
-    try {
-      const result = await api("/api/hearing/answer", {
+  };
+  const updateEntry = (emotion: Emotion, field: keyof Entry, value: string) =>
+    setEntries((current) =>
+      current.map((entry) => (entry.emotion === emotion ? { ...entry, [field]: value } : entry)),
+    );
+  const start = () =>
+    run(() =>
+      request("/api/sessions", {
+        method: "POST",
+        body: JSON.stringify({ consent_to_ai: true, entries }),
+      }),
+    );
+  const generate = () =>
+    run(() =>
+      request("/api/cards/generate", {
         method: "POST",
         body: JSON.stringify({
-          question_id: view.question.id,
-          answer,
-          expected_version: view.version,
+          expected_version: view!.version,
           idempotency_key: crypto.randomUUID(),
         }),
-      });
-      const answered = result.view;
-      setAnswer("");
-      if (!answered) throw new Error("回答を保存できませんでした。");
-      const next = await api("/api/hearing/advance", {
-        method: "POST",
-        body: JSON.stringify({
-          expected_version: answered.version,
-          idempotency_key: crypto.randomUUID(),
-        }),
-      });
-      setView(next.view ?? answered);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "回答を保存できませんでした。");
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  async function generateDraft() {
-    if (!view) return;
-    setLoading(true);
-    setError("");
-    try {
-      const result = await api("/api/draft/generate", {
-        method: "POST",
-        body: JSON.stringify({
-          expected_version: view.version,
-          idempotency_key: crypto.randomUUID(),
-        }),
-      });
-      setView(result.view ?? null);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "文章を作成できませんでした。");
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  async function saveDraft() {
-    if (!view) return;
-    setLoading(true);
-    setError("");
-    try {
-      const result = await api("/api/draft", {
+      }),
+    );
+  const saveCards = () =>
+    run(() =>
+      request("/api/cards", {
         method: "PATCH",
-        body: JSON.stringify({ title, contents, expected_version: view.version }),
-      });
-      setView(result.view ?? null);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "文章を保存できませんでした。");
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  async function approveDraft() {
-    if (!view?.draft) return;
-    setLoading(true);
-    setError("");
-    try {
-      const result = await api("/api/draft/approve", {
+        body: JSON.stringify({ cards, expected_version: view!.version }),
+      }),
+    );
+  const approve = () =>
+    run(() =>
+      request("/api/cards/approve", {
         method: "POST",
         body: JSON.stringify({
-          content_revision_id: view.draft.revision_id,
-          expected_version: view.version,
+          expected_version: view!.version,
           idempotency_key: crypto.randomUUID(),
         }),
-      });
-      setView(result.view ?? null);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "承認できませんでした。");
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  async function approveArtwork() {
-    if (!view) return;
-    setLoading(true);
-    setError("");
-    try {
-      const artifactId = view.artwork?.artifact_id ?? null;
-      const result = await api("/api/image/approve", {
+      }),
+    );
+  const regenerate = (emotion: Emotion) =>
+    run(() =>
+      request(`/api/cards/${emotion}/regenerate`, {
         method: "POST",
         body: JSON.stringify({
-          artifact_id: artifactId,
-          expected_version: view.version,
+          expected_version: view!.version,
           idempotency_key: crypto.randomUUID(),
         }),
-      });
-      setView(result.view ?? null);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "PDFを作成できませんでした。");
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  async function cancel() {
-    await api("/api/sessions/current", { method: "DELETE" });
-    setView(null);
-  }
-
-  async function complete() {
-    if (!view) return;
-    setLoading(true);
-    try {
-      const result = await api("/api/complete", {
-        method: "POST",
-        body: JSON.stringify({ expected_version: view.version }),
-      });
-      setView(result.view ?? null);
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  async function skipImage() {
-    if (!view) return;
-    setLoading(true);
-    setError("");
-    try {
-      const result = await api("/api/image/skip", {
-        method: "POST",
-        body: JSON.stringify({
-          expected_version: view.version,
-          idempotency_key: crypto.randomUUID(),
-        }),
-      });
-      setView(result.view ?? null);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "画像なしで進めませんでした。");
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  async function retryPdf() {
-    if (!view) return;
-    setLoading(true);
-    setError("");
-    try {
-      const result = await api("/api/pdf/retry", {
-        method: "POST",
-        body: JSON.stringify({
-          expected_version: view.version,
-          idempotency_key: crypto.randomUUID(),
-        }),
-      });
-      setView(result.view ?? null);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "PDF再試行できませんでした。");
-    } finally {
-      setLoading(false);
-    }
-  }
-
+      }),
+    );
   return (
     <main>
       <header>
-        <h1>彼氏に伝えたいことは？</h1>
+        <h1>喜怒哀楽 本音カード</h1>
+        <p>専門スタッフが入力した4つの気持ちをカードにします。</p>
       </header>
       {error && (
         <div className="error" role="alert">
           {error}
         </div>
       )}
-
-      {loading && (
-        <section className="card hearing-loading" aria-live="polite" aria-busy="true">
-          <div className="loading-step"></div>
-          <div className="skeleton skeleton-question"></div>
-          <div className="skeleton skeleton-answer"></div>
-          <div className="loading-actions">
-            <div className="skeleton skeleton-button"></div>
-            <div className="skeleton skeleton-button"></div>
-          </div>
-          <p>送信しています</p>
-        </section>
-      )}
-
-      {!loading && !view && (
+      {loading && <p aria-live="polite">処理しています...</p>}
+      {!view && !loading && (
         <section className="card">
-          <label htmlFor="initial">伝えたいこと</label>
-          <br />
-          <textarea
-            id="initial"
-            value={initial}
-            onChange={(e) => setInitial(e.target.value)}
-            maxLength={1000}
-            placeholder="自然な言葉で書いてください"
-          />
-          <br />
-          <label className="check">
-            <input
-              type="checkbox"
-              checked={consent}
-              onChange={(e) => setConsent(e.target.checked)}
-            />
-            この内容をAIで処理することに同意します
-          </label>
-          <br />
-          <button disabled={loading || !consent || !initial.trim()} onClick={() => void start()}>
-            ヒアリングを始める
-          </button>
-        </section>
-      )}
-
-      {!loading && view?.status === "HEARING" && (
-        <section className="card">
-          <p className="step">質問 {view.question_count}/5</p>
-          {view.question ? (
-            <>
-              <h2>{view.question.text}</h2>
+          <h2>4つの気持ちを入力</h2>
+          {entries.map((entry) => (
+            <fieldset key={entry.emotion}>
+              <legend>{labels[entry.emotion]}</legend>
               <textarea
-                value={answer}
-                onChange={(e) => setAnswer(e.target.value)}
-                maxLength={1500}
+                aria-label={`${labels[entry.emotion]} 本音`}
+                value={entry.note}
+                maxLength={1000}
+                onChange={(e) => updateEntry(entry.emotion, "note", e.target.value)}
+                placeholder="本人の本音"
               />
-              <div className="actions">
-                <button disabled={loading || !answer.trim()} onClick={() => void submitAnswer()}>
-                  回答する
-                </button>
-                <button
-                  className="secondary"
-                  disabled={loading}
-                  onClick={() => void generateDraft()}
-                >
-                  この内容で文章化
-                </button>
-              </div>
-            </>
-          ) : null}
-        </section>
-      )}
-
-      {!loading && view?.status === "TEXT_REVIEW" && view.draft && (
-        <section className="card">
-          <p className="step">文章の確認</p>
-          <label htmlFor="title">タイトル</label>
-          <input
-            id="title"
-            value={title}
-            onChange={(e) => setTitle(e.target.value)}
-            maxLength={24}
-          />
-          <label htmlFor="contents">本文</label>
-          <textarea
-            id="contents"
-            value={contents}
-            onChange={(e) => setContents(e.target.value)}
-            maxLength={60}
-          />
-          <div className="actions">
-            <button className="secondary" disabled={loading} onClick={() => void saveDraft()}>
-              編集を新しい文章として保存
-            </button>
-            <button disabled={loading} onClick={() => void approveDraft()}>
-              この文章を承認
-            </button>
-          </div>
-        </section>
-      )}
-
-      {!loading && view?.status === "ART_REVIEW" && (
-        <section className="card">
-          <p className="step">仕上がり見本</p>
-          <article className="letter-page letter-preview">
-            <img className="letter-template" src="/card.svg" alt="" aria-hidden="true" />
-            {view.artwork ? (
-              <img
-                className="letter-artwork"
-                src="/api/image/current"
-                alt="装飾画像の見本"
-              />
-            ) : (
-              <div className="letter-artwork letter-artwork-empty" aria-hidden="true" />
-            )}
-            <h1 className="letter-title">{view.draft?.title}</h1>
-            <div className="letter-body">{view.draft?.contents}</div>
-          </article>
-          <div className="actions">
-            <button disabled={loading} onClick={() => void approveArtwork()}>
-              見た目を承認してPDF作成
-            </button>
-          </div>
-        </section>
-      )}
-
-      {!loading && view?.status === "READY" && (
-        <section className="card success">
-          <p className="step">PDFの準備ができました</p>
-          <a className="button" href="/api/download">
-            PDFをダウンロード
-          </a>
-          <button disabled={loading} onClick={() => void complete()}>
-            完了
+            </fieldset>
+          ))}
+          <button
+            // disabled={!consent || entries.some((entry) => !entry.note.trim())}
+            onClick={() => void start()}
+          >
+            入力を保存
           </button>
         </section>
       )}
-
-      {!loading && view?.status === "IMAGE_ERROR" && (
+      {view?.status === "INPUT" && (
         <section className="card">
-          <p className="step">画像を生成できませんでした</p>
-          <p>再試行するか、装飾なしで進めます。</p>
-          <div className="actions">
-            <button className="secondary" disabled={loading} onClick={() => void skipImage()}>
-              画像なしで進む
-            </button>
-          </div>
+          <h2>入力を確認</h2>
+          <button
+            onClick={() =>
+              void run(() =>
+                request("/api/inputs", {
+                  method: "PATCH",
+                  body: JSON.stringify({
+                    consent_to_ai: true,
+                    entries,
+                    expected_version: view.version,
+                  }),
+                }),
+              )
+            }
+          >
+            入力を更新
+          </button>
+          <button onClick={() => void generate()}>4文章を生成</button>
         </section>
       )}
-
-      {!loading && view?.status === "PDF_ERROR" && (
+      {view?.status === "TEXT_REVIEW" && (
         <section className="card">
-          <p className="step">PDFを作成できませんでした</p>
-          <div className="actions">
-            <button disabled={loading} onClick={() => void retryPdf()}>
-              PDFを再試行
-            </button>
-          </div>
+          <h2>文章を確認・編集</h2>
+          {cards.map((card, i) => (
+            <fieldset key={card.emotion}>
+              <legend>{labels[card.emotion]}</legend>
+              <input
+                value={card.title}
+                maxLength={24}
+                onChange={(e) =>
+                  setCards((all) =>
+                    all.map((item, index) =>
+                      index === i ? { ...item, title: e.target.value } : item,
+                    ),
+                  )
+                }
+              />
+              <textarea
+                value={card.contents}
+                maxLength={60}
+                onChange={(e) =>
+                  setCards((all) =>
+                    all.map((item, index) =>
+                      index === i ? { ...item, contents: e.target.value } : item,
+                    ),
+                  )
+                }
+              />
+              <button onClick={() => void regenerate(card.emotion)}>この感情を再生成</button>
+            </fieldset>
+          ))}
+          <button onClick={() => void saveCards()}>編集を保存</button>
+          <button onClick={() => void approve()}>4件すべてを承認して画像生成</button>
         </section>
       )}
-
-      {!loading && view?.status === "COMPLETED" && (
+      {(view?.status === "IMAGE_RUNNING" || view?.status === "PDF_RUNNING") && (
+        <section className="card">
+          <h2>生成中</h2>
+          <p>
+            {view.status === "IMAGE_RUNNING"
+              ? "4画像を生成しています。"
+              : "4ページPDFを作成しています。"}
+          </p>
+        </section>
+      )}
+      {view?.status === "IMAGE_ERROR" && (
+        <section className="card">
+          <h2>画像生成エラー</h2>
+          {view.images
+            .filter((image) => image.status === "failed")
+            .map((image) => (
+              <button
+                key={image.emotion}
+                onClick={() =>
+                  void run(() =>
+                    request(`/api/images/${image.emotion}/retry`, {
+                      method: "POST",
+                      body: JSON.stringify({
+                        expected_version: view.version,
+                        idempotency_key: crypto.randomUUID(),
+                      }),
+                    }),
+                  )
+                }
+              >
+                {labels[image.emotion]}を再試行
+              </button>
+            ))}
+        </section>
+      )}
+      {view?.status === "PDF_ERROR" && (
+        <section className="card">
+          <h2>PDF生成エラー</h2>
+          <button
+            onClick={() =>
+              void run(() =>
+                request("/api/pdf/retry", {
+                  method: "POST",
+                  body: JSON.stringify({
+                    expected_version: view.version,
+                    idempotency_key: crypto.randomUUID(),
+                  }),
+                }),
+              )
+            }
+          >
+            PDFを再試行
+          </button>
+        </section>
+      )}
+      {(view?.status === "READY" || view?.status === "COMPLETED") && (
         <section className="card success">
-          <p className="step">完了</p>
+          <h2>PDFの準備ができました</h2>
           <a className="button" href="/api/download">
-            PDFをもう一度ダウンロード
+            4ページPDFをダウンロード
           </a>
         </section>
-      )}
-
-      {!loading && view && (
-        <button className="cancel" disabled={loading} onClick={() => void cancel()}>
-          中止して削除
-        </button>
       )}
     </main>
   );
 }
-
 createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
     <App />

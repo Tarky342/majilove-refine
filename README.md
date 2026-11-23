@@ -1,6 +1,6 @@
 # Letter PDF App
 
-日本語の短いヒアリングから恋人への文章を作成し、承認後に装飾画像とA4 PDFへ進むWebアプリです。
+専門スタッフが入力した喜怒哀楽4件から、文章4件・画像4件・A4縦4ページPDFを作成するWebアプリです。AIヒアリングは使用しません。
 
 ## セットアップ
 
@@ -29,9 +29,11 @@ npx wrangler d1 migrations apply letter-pdf-db --local
 
 本番R2バケットはCloudflare Dashboardで有効化・作成後に、ダッシュボードの公開アクセスを無効にしてください。
 
-## モックモード
+## v2 APIとモックモード
 
-`wrangler.jsonc` の `MOCK_MODE=true` ではOpenAIを呼び出さず、ローカルメモリ内でセッションを保持します。CIや課金なしの開発に使用します。実モードでは `MOCK_MODE=false` とし、`.dev.vars` またはWorker Secretの `OPENAI_API_KEY` が必須です。キー未設定時は利用可能なふりをせず、503で停止します。
+`wrangler.jsonc` の `MOCK_MODE=true` ではOpenAIを呼び出さず、4件のモック文章・画像を生成します。D1が利用できる場合、セッション状態はスナップショットとして保存されます。実モードでは `MOCK_MODE=false` とし、`.dev.vars` またはWorker Secretの `OPENAI_API_KEY` が必須です。
+
+主要APIは `POST /api/sessions`（4入力）、`POST /api/cards/generate`、`PATCH /api/cards`、`POST /api/cards/approve`、`POST /api/images/:emotion/retry`、`POST /api/pdf/retry`、`GET /api/download` です。
 
 実モードでローカル確認する場合は `npm run dev:real` を使用します。
 
@@ -88,7 +90,6 @@ npx wrangler deployments list --name letter-pdf-app
 
 ## 仮定
 
-- MVPは1セッション1通、ログインなし、セッション有効期間24時間
-- モック版は再起動でセッションが消える
-- 現時点のモックPDFは開ける最小PDFであり、日本語フォント埋め込み済みの本番PDFではない
-- 実OpenAI、D1、R2、Workflows、Browser Runは次のフェーズで接続する
+- 1セッション1カードセット、ログインなし、セッション有効期間24時間
+- 実OpenAI・R2・Browser Run・本番D1の接続と、実PDFの日本語文字選択は未検証
+- モックPDFは4ページの構造確認用で、実PDF品質の代替ではない

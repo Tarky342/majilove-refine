@@ -187,6 +187,7 @@ main {
   height: 28.64%;
   object-fit: cover;
   object-position: center;
+  overflow: hidden;
   z-index: 2;
 }
 
