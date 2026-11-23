@@ -1,6 +1,6 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
-  "name": "letter-pdf-app",
+  "name": "majilave-refine",
   "main": "src/worker/index.ts",
   "compatibility_date": "2026-11-21",
   "assets": {
@@ -27,7 +27,7 @@
   "vars": {
     "MODEL_TEXT": "gpt-6.1-terra",
     "MODEL_IMAGE": "gpt-image-2.6-flare",
-    "MOCK_MODE": "true",
+    "MOCK_MODE": "false",
   },
 
   "observability": {
